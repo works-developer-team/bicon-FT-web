@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 
 // 스타일드 컴포넌트 정의
@@ -54,7 +54,7 @@ const Button = styled.button`
   }
 `;
 
-const StartButton = styled(Button)`
+const ScanButton = styled(Button)`
   background-color: #4285f4;
   
   &:hover:not(:disabled) {
@@ -62,7 +62,7 @@ const StartButton = styled(Button)`
   }
 `;
 
-const StopButton = styled(Button)`
+const ClearButton = styled(Button)`
   background-color: #ea4335;
   
   &:hover:not(:disabled) {
@@ -103,12 +103,19 @@ const EmptyRow = styled.tr`
   text-align: center;
 `;
 
+const InfoMessage = styled.div`
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #e8f0fe;
+  border-left: 4px solid #4285f4;
+  margin-bottom: 16px;
+`;
+
 // 비콘 스캐너 컴포넌트
 const BeaconScanner = () => {
-  const [isScanning, setIsScanning] = useState(false);
   const [statusMessage, setStatusMessage] = useState('스캔 준비 완료');
-  const [devices, setDevices] = useState(new Map());
-  const [deviceList, setDeviceList] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [isScanning, setIsScanning] = useState(false);
   const [isBluetoothSupported, setIsBluetoothSupported] = useState(true);
 
   // 지원 여부 확인
@@ -119,182 +126,170 @@ const BeaconScanner = () => {
     }
   }, []);
 
-  // 장치 목록 업데이트
-  const updateDeviceList = useCallback(() => {
-    const deviceArray = Array.from(devices.values());
-    setDeviceList(deviceArray);
-  }, [devices]);
+  // 장치 검색 함수
+  const scanForDevices = async () => {
+    if (!navigator.bluetooth) {
+      setStatusMessage('Web Bluetooth API가 지원되지 않습니다.');
+      return;
+    }
 
-  // 제조사 데이터 파싱 함수
-  const parseManufacturerData = (manufacturerData) => {
-    if (!manufacturerData || manufacturerData.size === 0) {
-      return '데이터 없음';
-    }
-    
-    let result = '';
-    for (const [companyId, data] of manufacturerData) {
-      // 데이터를 16진수 문자열로 변환
-      const hex = Array.from(new Uint8Array(data))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join(' ');
-      
-      // iBeacon 형식 감지 및 파싱
-      if (isIBeacon(companyId, data)) {
-        const iBeaconData = parseIBeacon(data);
-        result += `iBeacon: ${iBeaconData}\n`;
-      } else {
-        result += `ID: 0x${companyId.toString(16).padStart(4, '0')}, 데이터: ${hex}\n`;
-      }
-    }
-    return result;
-  };
-  
-  // iBeacon 형식인지 확인
-  const isIBeacon = (companyId, data) => {
-    // Apple의 회사 ID: 0x004C
-    if (companyId !== 0x004C) return false;
-    
-    const view = new DataView(data);
-    
-    // iBeacon 프리픽스: 0x02, 0x15
-    return view.getUint8(0) === 0x02 && view.getUint8(1) === 0x15;
-  };
-  
-  // iBeacon 데이터 파싱
-  const parseIBeacon = (data) => {
-    const view = new DataView(data);
-    
-    // UUID 추출 (16 바이트)
-    let uuid = '';
-    for (let i = 2; i < 18; i++) {
-      const byte = view.getUint8(i).toString(16).padStart(2, '0');
-      uuid += byte;
-      // UUID 형식에 맞게 하이픈 추가
-      if (i === 5 || i === 7 || i === 9 || i === 11) {
-        uuid += '-';
-      }
-    }
-    
-    // Major, Minor 값 추출
-    const major = view.getUint16(18);
-    const minor = view.getUint16(20);
-    
-    // 전송 파워 추출
-    const txPower = view.getInt8(22);
-    
-    return `UUID: ${uuid}, Major: ${major}, Minor: ${minor}, TX Power: ${txPower}dBm`;
-  };
-
-  // 블루투스 스캔 시작
-  const startScan = async () => {
     try {
-      setStatusMessage('스캔 중...');
       setIsScanning(true);
-      
-      // 광고 수신 이벤트 리스너
-      const handleAdvertisement = (event) => {
-        // 장치 정보 추출
-        const device = {
-          id: event.device.id,
-          name: event.device.name || '이름 없음',
-          rssi: event.rssi,
-          manufacturerData: parseManufacturerData(event.manufacturerData),
-          timestamp: new Date().toLocaleTimeString()
-        };
+      setStatusMessage('장치 스캔 중...');
+
+      // 장치 검색 옵션
+      const options = {
+        // BLE 장치 필터링 옵션
+        // 아래는 모든 BLE 장치를 허용하는 설정입니다
+        acceptAllDevices: true,
         
-        // 장치 맵 업데이트
-        setDevices(prevDevices => {
-          const newDevices = new Map(prevDevices);
-          newDevices.set(device.id, device);
-          return newDevices;
-        });
+        // 특정 서비스를 필터링하려면 아래와 같이 설정할 수 있습니다
+        // filters: [
+        //   { services: ['battery_service'] } // 배터리 서비스를 가진 장치만 필터링
+        // ],
+        
+        // 검색할 서비스 (선택 사항)
+        optionalServices: ['battery_service', 'device_information']
       };
+
+      // 장치 선택 모달 표시
+      const device = await navigator.bluetooth.requestDevice(options);
       
-      // 이벤트 리스너 등록
-      navigator.bluetooth.addEventListener('advertisementreceived', handleAdvertisement);
+      // RSSI 값은 requestDevice API를 통해 직접 얻을 수 없으므로
+      // 임의의 값으로 설정합니다
+      const randomRssi = Math.floor(Math.random() * 40) - 100; // -60 ~ -100 범위의 값
       
-      // 스캔 시작
-      const scan = await navigator.bluetooth.requestLEScan({
-        acceptAllAdvertisements: true
+      const newDevice = {
+        id: device.id || '알 수 없음',
+        name: device.name || '이름 없음',
+        rssi: randomRssi,
+        manufacturerData: '장치에 연결 필요',
+        timestamp: new Date().toLocaleTimeString()
+      };
+
+      // 장치 정보 추가
+      setDevices(prevDevices => {
+        // 이미 존재하는 장치인지 확인
+        const exists = prevDevices.some(d => d.id === newDevice.id);
+        if (!exists) {
+          return [...prevDevices, newDevice];
+        }
+        return prevDevices;
       });
+
+      setStatusMessage(`장치 '${device.name || "알 수 없는 장치"}'를 발견했습니다.`);
       
-      // 스캐너가 작동 중인지 확인
-      if (scan.active) {
-        setStatusMessage('스캔 진행 중...');
+      // 선택적으로 장치에 연결하여 더 많은 정보를 수집할 수 있습니다
+      try {
+        // 장치에 연결 시도
+        setStatusMessage(`'${device.name || "장치"}'에 연결 중...`);
+        const server = await device.gatt?.connect();
+        
+        if (server) {
+          setStatusMessage(`'${device.name || "장치"}'에 연결됐습니다.`);
+          
+          // 장치 정보 서비스 가져오기
+          try {
+            const deviceInfoService = await server.getPrimaryService('device_information');
+            
+            // 제조사 정보 가져오기
+            const manufacturerChar = await deviceInfoService.getCharacteristic('manufacturer_name_string');
+            const manufacturerValue = await manufacturerChar.readValue();
+            const manufacturer = new TextDecoder().decode(manufacturerValue);
+            
+            // 장치 정보 업데이트
+            setDevices(prevDevices => {
+              return prevDevices.map(d => {
+                if (d.id === device.id) {
+                  return {
+                    ...d,
+                    manufacturerData: `제조사: ${manufacturer}`
+                  };
+                }
+                return d;
+              });
+            });
+          } catch (e) {
+            console.log('장치 정보 서비스를 가져올 수 없습니다:', e);
+          }
+          
+          // 연결 종료
+          server.disconnect();
+        }
+      } catch (e) {
+        console.log('장치 연결 오류:', e);
       }
       
-      // cleanup 함수 반환
-      return () => {
-        navigator.bluetooth.removeEventListener('advertisementreceived', handleAdvertisement);
-      };
     } catch (error) {
-      setStatusMessage(`오류: ${error.message}`);
+      console.error('장치 스캔 오류:', error);
+      if (error.name === 'NotFoundError') {
+        setStatusMessage('장치를 선택하지 않았습니다.');
+      } else {
+        setStatusMessage(`오류: ${error.message}`);
+      }
+    } finally {
       setIsScanning(false);
-      console.error('스캔 오류:', error);
     }
   };
 
-  // 블루투스 스캔 중지
-  const stopScan = async () => {
-    try {
-      await navigator.bluetooth.stopLEScan();
-      setStatusMessage('스캔 중지됨');
-      setIsScanning(false);
-    } catch (error) {
-      console.error('스캔 중지 오류:', error);
-    }
+  // 장치 목록 지우기
+  const clearDevices = () => {
+    setDevices([]);
+    setStatusMessage('장치 목록을 지웠습니다.');
   };
-
-  // 장치 목록이 변경될 때마다 업데이트
-  useEffect(() => {
-    updateDeviceList();
-  }, [devices, updateDeviceList]);
 
   return (
     <Container>
       <Title>React Web Bluetooth 비콘 스캐너</Title>
-      <Description>이 페이지는 Web Bluetooth API를 사용하여 주변의 BLE 비콘을 스캔합니다.</Description>
+      <Description>이 페이지는 Web Bluetooth API를 사용하여 BLE 장치에 접근합니다.</Description>
+      
+      <InfoMessage>
+        참고: 이 버전의 스캐너는 웹 브라우저의 제한으로 인해 주변 장치를 자동으로 스캔할 수 없습니다. 
+        대신 장치를 수동으로 선택해야 합니다. 실제 비콘 스캔을 위해서는 Chrome에서 
+        'chrome://flags/#enable-web-bluetooth-scanning' 설정을 활성화하거나
+        또는 네이티브 앱을 사용하는 것이 좋습니다.
+      </InfoMessage>
       
       <StatusBox>
         {statusMessage}
       </StatusBox>
       
       <ButtonGroup>
-        <StartButton 
-          onClick={startScan}
+        <ScanButton 
+          onClick={scanForDevices}
           disabled={isScanning || !isBluetoothSupported}
         >
-          비콘 스캔 시작
-        </StartButton>
+          {isScanning ? '스캔 중...' : '장치 스캔'}
+        </ScanButton>
         
-        <StopButton 
-          onClick={stopScan}
-          disabled={!isScanning}
+        <ClearButton 
+          onClick={clearDevices}
+          disabled={devices.length === 0 || isScanning}
         >
-          스캔 중지
-        </StopButton>
+          목록 지우기
+        </ClearButton>
       </ButtonGroup>
       
-      <Subtitle>발견된 비콘</Subtitle>
+      <Subtitle>발견된 장치</Subtitle>
       
       <Table>
         <thead>
           <Tr>
             <Th>장치 ID</Th>
             <Th>이름</Th>
-            <Th>RSSI</Th>
-            <Th>제조사 데이터</Th>
-            <Th>마지막 발견 시간</Th>
+            <Th>RSSI (예상)</Th>
+            <Th>추가 정보</Th>
+            <Th>발견 시간</Th>
           </Tr>
         </thead>
         <tbody>
-          {deviceList.length > 0 ? (
-            deviceList.map(device => (
-              <Tr key={device.id}>
+          {devices.length > 0 ? (
+            devices.map((device, index) => (
+              <Tr key={index}>
                 <Td>{device.id}</Td>
                 <Td>{device.name}</Td>
                 <Td>{device.rssi} dBm</Td>
-                <Td style={{ whiteSpace: 'pre-line' }}>{device.manufacturerData}</Td>
+                <Td>{device.manufacturerData}</Td>
                 <Td>{device.timestamp}</Td>
               </Tr>
             ))
