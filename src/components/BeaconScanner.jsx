@@ -111,19 +111,52 @@ const InfoMessage = styled.div`
   margin-bottom: 16px;
 `;
 
+const ErrorMessage = styled.div`
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #fce8e6;
+  border-left: 4px solid #ea4335;
+  margin-bottom: 16px;
+`;
+
 // 비콘 스캐너 컴포넌트
 const BeaconScanner = () => {
   const [statusMessage, setStatusMessage] = useState('스캔 준비 완료');
   const [devices, setDevices] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
   const [isBluetoothSupported, setIsBluetoothSupported] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // 지원 여부 확인
   useEffect(() => {
-    if (!navigator.bluetooth) {
-      setIsBluetoothSupported(false);
-      setStatusMessage('이 브라우저는 Web Bluetooth API를 지원하지 않습니다. Chrome이나 Edge 같은 다른 브라우저를 사용해 보세요.');
-    }
+    // Feature detection - Web Bluetooth API 지원 여부 확인
+    const checkBluetoothSupport = () => {
+      try {
+        if (!navigator.bluetooth) {
+          setIsBluetoothSupported(false);
+          setStatusMessage('이 브라우저는 Web Bluetooth API를 지원하지 않습니다. Chrome이나 Edge 같은 다른 브라우저를 사용해 보세요.');
+          return false;
+        }
+        
+        // requestLEScan 오류를 방지하기 위한 조치
+        // 이 함수를 직접 호출하는 코드는 없지만, 다른 곳에서 발생하는 오류 방지
+        if (typeof navigator.bluetooth.requestLEScan === 'function') {
+          console.log('requestLEScan 함수가 존재합니다. 실험적 기능이 활성화되어 있습니다.');
+        } else {
+          console.log('requestLEScan 함수가 존재하지 않습니다. 실험적 기능 없이 계속합니다.');
+          // 오류 메시지는 표시하지 않고 계속 진행, requestDevice만 사용할 것이므로
+        }
+        
+        return true;
+      } catch (error) {
+        console.error('Web Bluetooth API 검사 중 오류:', error);
+        setIsBluetoothSupported(false);
+        setErrorMessage(`Web Bluetooth API 오류: ${error.message}`);
+        return false;
+      }
+    };
+    
+    checkBluetoothSupport();
   }, []);
 
   // 장치 검색 함수
@@ -136,6 +169,7 @@ const BeaconScanner = () => {
     try {
       setIsScanning(true);
       setStatusMessage('장치 스캔 중...');
+      setErrorMessage(''); // 이전 오류 메시지 초기화
 
       // 장치 검색 옵션
       const options = {
@@ -224,8 +258,13 @@ const BeaconScanner = () => {
       console.error('장치 스캔 오류:', error);
       if (error.name === 'NotFoundError') {
         setStatusMessage('장치를 선택하지 않았습니다.');
+      } else if (error.message.includes('requestLEScan')) {
+        // requestLEScan 관련 오류 처리
+        setErrorMessage('requestLEScan 함수를 사용할 수 없습니다. 이 브라우저에서는 수동 장치 선택만 지원됩니다.');
+        setStatusMessage('스캔 오류가 발생했습니다.');
       } else {
         setStatusMessage(`오류: ${error.message}`);
+        setErrorMessage(`상세 오류 정보: ${error.name} - ${error.message}`);
       }
     } finally {
       setIsScanning(false);
@@ -249,6 +288,12 @@ const BeaconScanner = () => {
         'chrome://flags/#enable-web-bluetooth-scanning' 설정을 활성화하거나
         또는 네이티브 앱을 사용하는 것이 좋습니다.
       </InfoMessage>
+      
+      {errorMessage && (
+        <ErrorMessage>
+          {errorMessage}
+        </ErrorMessage>
+      )}
       
       <StatusBox>
         {statusMessage}
