@@ -1,5 +1,5 @@
 import React from 'react';
-import BeaconScanner from './components/BeaconScanner';
+import BeaconScanner from './components/BeaconScanner.jsx';
 
 function App() {
   return (
